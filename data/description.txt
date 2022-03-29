@@ -1,0 +1,7 @@
+/tweets is a copy of the dataset at https://www.kaggle.com/datasets/ayhmrba/elon-musk-tweets-2010-2021 (March 25th 2022).
+
+/TSLA_2020_2019 is a copy of https://www.kaggle.com/datasets/timoboz/tesla-stock-data-from-2010-to-2020 (March 25th 2022).
+/TSLA_2017_2022 is a copy of https://www.nasdaq.com/market-activity/stocks/tsla/historical (March 25th 2022).
+
+As a first preprocessing step, I looked through which of the files in /tweets are actually needed since most files 
+contain multiple years, those needed along with the datasets for Tesla stock prices are in /needed.
