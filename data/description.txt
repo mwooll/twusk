@@ -1,7 +1,13 @@
 /tweets is a copy of the dataset at https://www.kaggle.com/datasets/ayhmrba/elon-musk-tweets-2010-2021 (March 25th 2022).
 
-/TSLA_2020_2019 is a copy of https://www.kaggle.com/datasets/timoboz/tesla-stock-data-from-2010-to-2020 (March 25th 2022).
+/TSLA_2010_2019 is a copy of https://www.kaggle.com/datasets/timoboz/tesla-stock-data-from-2010-to-2020 (March 25th 2022).
 /TSLA_2017_2022 is a copy of https://www.nasdaq.com/market-activity/stocks/tsla/historical (March 25th 2022).
+
+/TSLA_2010_2018 is a copy of https://finance.yahoo.com/quote/TSLA/history?period1=1277769600&period2=1535414400&interval=1d&filter=history&frequency=1d&includeAdjustedClose=true (March 31th 2022).
 
 As a first preprocessing step, I looked through which of the files in /tweets are actually needed since most files 
 contain multiple years, those needed along with the datasets for Tesla stock prices are in /needed.
+
+31.3.22
+TSLA_2010_2019 does not have the same data for the same day as TSLA_2017_2022. The values seem to be multiplied by 5 for the prices, don't know by what factor for the volume.
+Found new data set TSLA_2010_2018 which has the same values and very close volume to TSLA_2017_2022. Will use that one to make one big dataset.
