@@ -82,6 +82,10 @@ stock_2022 = stock_2022.rename(columns = {"Close/Last":"Close"})
 stock_2022["Date"] = pd.to_datetime(stock_2022["Date"], format="%m/%d/%Y")
 stock_2018["Date"] = pd.to_datetime(stock_2018["Date"], format="%Y-%m-%d")
 
+# remove all dollar signs before values
+for i in ["Close", "Open", "High", "Low"]:
+    stock_2022[i] = stock_2022[i].str.replace("$","")
+
 # check that data frames have compatible columns
 columns_2018 = stock_2018.columns
 columns_2022 = stock_2022.columns
@@ -95,6 +99,9 @@ except AssertionError:
 # put the 2 df's together and remove all duplicates
 stock = stock_2018.append(stock_2022, ignore_index=True)
 stock = stock.drop_duplicates(subset=["Date"])
+
+# make all column names lowercase
+stock.columns = stock.columns.str.lower()
 
 # save stock df to csv
 stock = stock.sort_values(by=['Date'], ascending=False)
