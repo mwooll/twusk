@@ -106,3 +106,10 @@ stock.columns = stock.columns.str.lower()
 # save stock df to csv
 stock = stock.sort_values(by=['Date'], ascending=False)
 stock.to_csv('data/needed/cleaned/Stock.csv', index=False)
+
+#df with all the data
+tweets["date"] = tweets["date"].dt.date
+stock["date"] = stock["date"].dt.date
+together = pd.merge(tweets, stock, on = ["date"], how="outer")
+together = together.sort_values(by=['date'], ascending=False)
+together.to_csv('data/needed/cleaned/Tweets_and_Stock.csv', index=False)
