@@ -94,17 +94,15 @@ def group_by_month(stocks_df, tweets_df):
     stocks_month = stocks_df.groupby(pd.Grouper(freq="M")).mean()
     counts_month = tweets_df.groupby(pd.Grouper(freq="M")).sum()
     combined_month = pd.concat([stocks_month, counts_month], axis=1)
-    combined_month.index.names = ["index"]
     combined_month["date"] = combined_month.index
     combined_month = combined_month.assign(colour="black")
     return combined_month
 
 def group_by_week(stocks_df, tweets_df):
     # group by weeks
-    stocks_week = stocks_df.groupby(pd.Grouper(freq="7D")).mean()
-    counts_week = tweets_df.groupby(pd.Grouper(freq="7D")).sum()
+    stocks_week = stocks_df.groupby(pd.Grouper(freq='W-MON')).mean()
+    counts_week = tweets_df.groupby(pd.Grouper(freq='W-MON')).sum()
     combined_week = pd.concat([stocks_week, counts_week], axis=1)
-    combined_week.index.names = ["index"]
     combined_week["date"] = combined_week.index
     combined_week = combined_week.assign(colour="black")
     return combined_week
@@ -113,7 +111,6 @@ def group_by_day(stocks_df, tweets_df):
     # ungrouped/grouped by day
     stocks_df.drop(columns=["date"], inplace=True)
     combined_df = pd.concat([tweets_df, stocks_df], axis=1)
-    combined_df.index.names = ["index"]
     combined_df = combined_df.assign(colour="black")
     return combined_df
 
@@ -138,15 +135,8 @@ if __name__ == "__main__":
 
     start = "2012-10-12"
     end = "2021-12-31"
-    stocks, tweets, daterange = make_DataFrames(tweet_columns, start, end)
+    stocks, tweets, daterange = make_DataFrames(tweet_columns, None, None)
 
-    print(stocks, tweets)
 
-    month = group_by_month(stocks, tweets)
-    print(month)
-
-    week = group_by_week(stocks, tweets)
+    week = group_by_day(stocks, tweets)
     print(week)
-
-    year = group_by_year(stocks, tweets)
-    print(year)
