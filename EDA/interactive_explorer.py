@@ -10,6 +10,10 @@ from bokeh.plotting import figure, curdoc
 from bokeh.layouts import column, row
 
 from sklearn import cluster
+from sklearn_extra.cluster import KMedoids
+
+
+from prepare_data import full_grouping
 
 """ Setting parameters """
 # plot dimensions
@@ -33,11 +37,8 @@ plot_names = ["upper", "lower", "scatter"]
 plotted = {"upper": "close", "scatter-x": "open", "scatter-y": "close"}
 cluster_colours = ["red", "blue", "green", "purple", "orange", "cyan", "lime"]
 
-grouping = {"keys": ["day", "month", "year", "season"], "active": "day"}
-dataframes = {key: None for key in grouping["keys"]}
-dataframes["raw stocks"] = None
-source_dict = {key: None for key in grouping["keys"]}
-# ranges_dict = {key: None for key in grouping["keys"]}
+grouping = {"keys": ["day", "week", "month", "year", "season"],
+            "active": "day"}
 cluster_dict = {key: {} for key in grouping["keys"]}
 
 """ Callback functions """
@@ -128,26 +129,40 @@ def perform_clustering():
     method = cluster_method.value
     attributes = cluster_attributes.value
     random_state = cluster_random.value
+    normalize = cluster_norm.value
 
     # gathering what attributes to consider when clustering
     if attributes == "visible on scatter plot":
         to_cluster = sorted([plotted["scatter-x"], plotted["scatter-y"]])
+
+    elif attributes == "open, close, volume, ntweets":
+        to_cluster = ["close", "ntweets", "open", "volume"]
 
     # preparing the data on which we perform the clustering
     identifier = " ".join(to_cluster)
     if identifier not in cluster_dict[grouping["active"]].keys():
         cluster_data = dataframes[grouping["active"]].loc[:, to_cluster]
         cluster_data.dropna(axis=0, how="any", inplace=True)
-        cluster_dict[grouping["active"]][identifier] = cluster_data
+        normalized = cluster_data.apply(lambda x: (x-x.mean())/ x.std(), axis=0)
+        cluster_dict[grouping["active"]][identifier] = {"false": cluster_data,
+                                                        "true":  normalized}
 
     # performing the clustering
+    data_to_plot = cluster_dict[grouping["active"]][identifier][normalize]
+    print(data_to_plot)
     if method == "k-means":
         kmeans = cluster.KMeans(n_clusters=cluster_k, copy_x=False,
-                                random_state=random_state, max_iter=500)
-        kmeans.fit_predict(cluster_dict[grouping["active"]][identifier])
+                                random_state=random_state, max_iter=1000)
+        kmeans.fit_predict(data_to_plot)
         labels = kmeans.labels_
-    elif method != "k-means":
+    elif method == "k-medoids":
+        kmedoids = KMedoids(n_clusters=cluster_k, random_state=random_state,
+                            method="pam", init="random", max_iter=1000)
+        kmedoids.fit(data_to_plot)
+        labels = kmedoids.labels_
+    else:
         print("The chosen method has not been implmented yet.")
+        return
 
     # updating the dataframe and source with the new colour column
     if grouping["active"] == "day":
@@ -175,11 +190,6 @@ def get_select_values(data_select, ratio_select, format_select):
     ratio = ratio_select.value
     form = format_select.value
 
-    # making sure that data is a valid entry in the dataframe/source
-    if data == "number of tweets":
-        # print('caught "number of tweets".')
-        data = "count"
-
     # fetching the denominator, if any
     if ratio == "data":
         denom = None
@@ -205,8 +215,15 @@ def update_dataframe_and_source(data, denom, form):
         if name not in dataframes[grouping["active"]].columns:
             absolute = np.absolute(dataframes[grouping["active"]][ratio])
             dataframes[grouping["active"]][f"{ratio}_absolute"] = absolute
-            logs = [np.log(k) if k > 0 else -10 for k in absolute]
-            dataframes[grouping["active"]][f"{ratio}_log_10(absolute)"] = logs
+            logs = [np.log(k) if k > 0 else -10
+                    for k in absolute if not np.isnan(k)]
+
+            log_key = f"{ratio}_log_10(absolute)"
+            try:
+                dataframes[grouping["active"]][log_key] = logs
+            except ValueError:
+                series = pd.Series(logs, index=dataframes["raw stocks"].index)
+                dataframes[grouping["active"]][log_key] = series
 
     # updating the ColumnDataSource
     source_dict[grouping["active"]].data = dict(dataframes[grouping["active"]])
@@ -236,114 +253,24 @@ def set_axis_label(data, denom, form, axis):
 
 
 """ Preparing the Data """
-def make_DataFrames_and_ColumnDataSources():
-    """ Reading in the data """
-    # Reading the wanted columns of the tweets data into a dataframe.
-    tweets_file_name = "../data/needed/cleaned/Tweets.csv"
-    needed_columns = ["date"]#, "tweet", "hashtags", "cashtags",
-                      # "nlikes", "nreplies", "nretweets"]
-    tweets_df = pd.read_csv(tweets_file_name, index_col=None,
-                            usecols=needed_columns)
+tweet_columns = ["date", "nlikes", "nreplies", "nretweets"]
+data = full_grouping(tweet_columns)
+day, week, month, year, season, date_range, raw = data
 
-    tweets_df["date"] = pd.to_datetime(tweets_df["date"]).dt.date
+dataframes = {"day": day, "week": week, "month": month,
+              "year": year, "season": season}
+source_dict = {key: ColumnDataSource(val) for key, val in dataframes.items()}
+dataframes["raw stocks"] = raw
 
-    # Reading the stock data into a dataframe.
-    stocks_file_name = "../data/needed/cleaned/Stock.csv"
-    stocks_df = pd.read_csv(stocks_file_name, index_col=None)
-    stocks_df["date"] = pd.to_datetime(stocks_df["date"])
-    stocks_df.set_index("date", inplace=True,
-                        verify_integrity=False, drop=True)
-    columns = list(stocks_df.columns)
-    stocks_df["close - open"] = stocks_df["close"] - stocks_df["open"]
-    col_with = list(stocks_df.columns) + ["number of tweets"]
-    stocks_df.index.names = ["index"]
-    stocks_df["date"] = stocks_df.index
-    dataframes["raw stocks"] = stocks_df
-    # print(stocks_df)
-
-    # Counting how many tweets there are for each day
-    tweet_min, tweet_max = min(tweets_df["date"]), max(tweets_df["date"])
-    stock_min, stock_max = max(stocks_df.index), max(stocks_df.index)
-    starting_date = min(pd.Timestamp(tweet_min), pd.Timestamp(stock_min))
-    ending_date = max(pd.Timestamp(tweet_max), pd.Timestamp(stock_max))
-
-    date_range = pd.date_range(start=starting_date, end=ending_date, freq="D")
-    counts = tweets_df["date"].value_counts()
-    counts.sort_index(inplace=True)
-
-    tweet_count = pd.Series([0 for date in date_range], index=date_range)
-    tweet_count.update(counts)
-    tweet_count_df = pd.DataFrame({"date": date_range, "count": tweet_count})
-    tweet_count_df.set_index("date", inplace=True,
-                             verify_integrity=False, drop=False)
-    tweet_count_df.sort_index(inplace=True, ascending=False)
-    # print(tweet_count_df)
-
-
-    """ Creating the grouped DataFrames and ColumnDataSources """
-    # group by years
-    stocks_year = stocks_df.groupby(stocks_df["date"].dt.year).mean()
-    counts_year = tweet_count_df.groupby(tweet_count_df["date"].dt.year).sum()
-    combined_year = pd.concat([stocks_year, counts_year], axis=1)
-    combined_year.index = [pd.Timestamp(f"{year}-01-01")
-                           for year in combined_year.index]
-    combined_year["date"] = combined_year.index
-    combined_year = combined_year.assign(colour="black")
-    source_year = ColumnDataSource(combined_year)
-
-    dataframes["year"] = combined_year
-    source_dict["year"] = source_year
-    # print(combined_year)
-
-    # group by months (not differentiating between years)
-    stocks_season = stocks_df.groupby(stocks_df["date"].dt.month).mean()
-    counts_season = tweet_count_df.groupby(tweet_count_df["date"].dt.month).sum()
-    combined_season = pd.concat([stocks_season, counts_season], axis=1)
-    combined_season.index = [pd.Timestamp(f"2022-{month}-01")
-                             for month in combined_season.index]
-    combined_season["date"] = combined_season.index 
-    combined_season = combined_season.assign(colour="black")
-    source_season = ColumnDataSource(combined_season)
-
-    dataframes["season"] = combined_season
-    source_dict["season"] = source_season
-    # print(combined_season)
-
-    # group by year and months
-    stocks_month = stocks_df.groupby(pd.Grouper(freq="M")).mean()
-    counts_month = tweet_count_df.groupby(pd.Grouper(freq="M")).sum()
-    combined_month = pd.concat([stocks_month, counts_month], axis=1)
-    combined_month.index.names = ["index"]
-    combined_month["date"] = combined_month.index
-    combined_month = combined_month.assign(colour="black")
-    source_month = ColumnDataSource(combined_month)
-
-    dataframes["month"] = combined_month
-    source_dict["month"] = source_month
-    # print(combined_month)
-
-    # group by weeks 
-
-    # ungrouped/grouped by day
-    stocks_df.drop(columns=["date"], inplace=True)
-    combined_df = pd.concat([tweet_count_df, stocks_df], axis=1)
-    combined_df.index.names = ["index"]
-    combined_df = combined_df.assign(colour="black")
-    source_day = ColumnDataSource(combined_df)
-
-    dataframes["day"] = combined_df
-    source_dict["day"] = source_day
-    # print(combined_df)
-
-    return date_range, columns, col_with
-
-date_range, columns, col_with = make_DataFrames_and_ColumnDataSources()
+# specifying the possible choices fo the data selects
+stock_columns = list(raw.columns)
+full_columns = tweet_columns + ["ntweets"] + stock_columns
 
 """ Getting the initial ranges and the colour mapper """
 # Calculating the necessary maxima to set the plot heights.
 max_closing = np.max(dataframes[grouping["active"]]["close"])
 max_opening = np.max(dataframes[grouping["active"]]["open"])
-max_tweet_count = np.max(dataframes[grouping["active"]]["count"])
+max_tweet_count = np.max(dataframes[grouping["active"]]["ntweets"])
 
 # Making a colour mapper.
 max_volume = np.max(dataframes[grouping["active"]]["volume"])
@@ -401,7 +328,7 @@ plot_tweet.yaxis.axis_label = "number of tweets"
 plot_tweet.xaxis.axis_label = "date"
 plot_tweet.sizing_mode = "stretch_width"
 
-plot_tweet.line(x="date", y="count", source=source_dict[grouping["active"]],
+plot_tweet.line(x="date", y="ntweets", source=source_dict[grouping["active"]],
                 line_width=line_width)
 
 # Defining a RangeTool which is linked to the x_range of the upper time plot.
@@ -421,10 +348,11 @@ plot_tweet.add_tools(tweets_hover)
 
 """ Making the change row for the time plots """
 stock_data = Select(title="data", value="close",
-                          options=col_with, width=small_width)
+                          options=stock_columns, width=small_width)
 
 stock_ratio = Select(title="ratio", value="data",
-                      options=["data"] + [f"data/{col}" for col in columns],
+                      options=["data"] + [f"data/{col}"
+                                          for col in stock_columns],
                       width=small_width)
 
 stock_format = Select(title="format", value="value",
@@ -434,10 +362,9 @@ stock_format = Select(title="format", value="value",
 update_upper_button = Button(label="apply changes to the upper plot")
 update_upper_button.on_click(update_upper_time_plot)
 
-tweet_select = Select(title="tweet data", value="count",
-                       options=["count", "nlikes", "nretweets", "nreplies"])
+tweet_select = Select(title="tweet data", value="ntweets",
+                       options=["ntweets", "nlikes", "nretweets", "nreplies"])
 # tweet_select.on_change("value", update_lower_time_plot)
-tweet_select.disabled = True
 
 """ Making the right column """
 scatter_plot = figure(plot_width=right_width, plot_height=right_width,
@@ -452,21 +379,22 @@ scatter_plot.scatter(x="open", y="close", color="colour",
                      source=source_dict[grouping["active"]])
 
 # Adding a HoverTool to the scatter plot.
-scatter_hover = HoverTool(tooltips = [
-                        ("date", "@date{%F}"),
-                        ("open", "@open$"),
-                        ("close", "@close$")],
-                    formatters={'@date': 'datetime'})
-scatter_plot.add_tools(scatter_hover)
+# scatter_hover = HoverTool(tooltips = [
+#                         ("date", "@date{%F}"),
+#                         ("open", "@open$"),
+#                         ("close", "@close$")],
+#                     formatters={'@date': 'datetime'})
+scatter_plot.add_tools(stocks_hover)
 
 
 """ Making the change rows for the scatter plot. """
 # selects for the x-axis
 scatter_x_data = Select(title="x-data", value="open",
-                        options=col_with, width=small_width)
+                        options=full_columns, width=small_width)
 
 scatter_x_ratio = Select(title="x-ratio", value="data",
-                         options=["data"] + [f"data/{col}" for col in columns],
+                         options=["data"] + [f"data/{col}"
+                                             for col in stock_columns],
                          width=small_width)
 
 scatter_x_format = Select(title="x-format", value="value",
@@ -475,10 +403,11 @@ scatter_x_format = Select(title="x-format", value="value",
 
 # selects for the y-axis
 scatter_y_data = Select(title="y-data", value="close",
-                        options=col_with, width=small_width)
+                        options=full_columns, width=small_width)
 
 scatter_y_ratio = Select(title="y-ratio", value="data",
-                         options=["data"] + [f"data/{col}" for col in columns],
+                         options=["data"] + [f"data/{col}"
+                                             for col in stock_columns],
                          width=small_width)
 
 scatter_y_format = Select(title="y-format", value="value",
@@ -505,12 +434,11 @@ cluster_method = Select(title="choose the clustering method", value="k-means",
                         options=["k-means", "k-medoids",
                                  "bottom-up", "top-down"],
                         width=small_width)
-cluster_method.disabled = True
 cluster_attributes = Select(title="choose the attributes",
                             value="visible on scatter plot",
-                            options=["visible on scatter plot"],
+                            options=["visible on scatter plot",
+                                     "open, close, volume, ntweets"],
                             width=small_width)
-cluster_attributes.disabled = True
 cluster_random = Slider(title="choose the random state",
                         start=0, end=10, value=0, step=1,
                         width=small_width)
@@ -518,12 +446,10 @@ cluster_norm = Select(title="normalize data", value="false",
                       options=["false", "true"], width=tiny_width)
 cluster_button = Button(label="perform clustering", width=small_width)
 cluster_button.on_click(perform_clustering)
-cluster_div = Div(text="date won't be considered when performing clustering.",
-                  width=right_width)
 
 
 """ Adding a Select for data imputation """
-impatation_select = Select
+imputation_select = Select
 
 
 
@@ -553,9 +479,7 @@ cluster_part = row(clustering_k,
                    cluster_attributes,
                    cluster_random,
                    cluster_norm,
-                   cluster_button,
-                   # cluster_div
-                   )
+                   cluster_button)
 
 layout = column(plot_part, cluster_part)
 layout.sizing_mode = "stretch_both"
