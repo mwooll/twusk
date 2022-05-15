@@ -1,20 +1,21 @@
+# interactive_explorer.py
+
 import numpy as np
 import pandas as pd
+import datetime
 
-import bokeh.palettes as bp
 from bokeh.models import (ColumnDataSource, HoverTool, RangeTool, ColorBar,
                           Div, Select, Button, RadioButtonGroup, Slider)
 from bokeh.models.widgets import DateRangeSlider
 from bokeh.plotting import figure, curdoc
 from bokeh.layouts import column, row
 
-# from bokeh.transform import log_cmap
-
 from sklearn import cluster
 from sklearn_extra.cluster import KMedoids
 
 
 from prepare_data import full_grouping
+
 
 """ Setting parameters """
 # plot dimensions
@@ -33,20 +34,22 @@ grouping_margin = [10, 5, 0, 5]
 
 # glyph attributes
 dot_size = 5
-# alpha_value = 0.5
 line_width = 0.5
 
+ # milliseconds in a day
+length_of_day = 86400000
 
 """ Global objects """
+tweet_columns = ["date", "nlikes", "nreplies", "nretweets"]
 plot_names = ["upper", "lower", "scatter"]
 plotted = {"upper": "close", "scatter-x": "open", "scatter-y": "close"}
 cluster_colours = ["red", "blue", "green", "purple", "orange", "cyan", "lime"]
 
-grouping = {"keys": ["day", "week", "month", "year", "season"],
+grouping = {"keys": ["day", "week", "month", "year"], #, "season"],
             "active": "day"}
 cluster_dict = {key: {} for key in grouping["keys"]}
 
-""" Callback functions """
+""" update functions for the plots """
 def update_upper_time_plot():
     """update funtion for the upper time plot"""
     data, denom, form = get_select_values(stock_data,
@@ -115,6 +118,8 @@ def update_scatter_plot():
     set_axis_range(y_name, scatter_plot.y_range)
     set_axis_label(y_data, y_denom, y_form, scatter_plot.yaxis)
 
+
+""" Callback functions """
 def perform_grouping(new):
     """changing the source to be plotted and make the necessary changes"""
     # fetching the new class to group by
@@ -127,13 +132,18 @@ def perform_grouping(new):
     update_lower_time_plot(None, None, None)
     update_scatter_plot()
 
+def modify_clustering_k(attr, new, old):
+    if new in ["affinity propagation"]:
+        clustering_k.title = "preference"
+    else:
+        clustering_k.title = "number of clusters"
+
 def perform_clustering():
     """performing clustering on the data"""
     # fetching the values from the select widgets
     cluster_k = int(clustering_k.value)
     method = cluster_method.value
     attributes = cluster_attributes.value
-    random_state = cluster_random.value
     normalize = cluster_norm.value
 
     # gathering what attributes to consider when clustering
@@ -148,52 +158,77 @@ def perform_clustering():
     if identifier not in cluster_dict[grouping["active"]].keys():
         cluster_data = dataframes[grouping["active"]].loc[:, to_cluster]
         cluster_data.dropna(axis=0, how="any", inplace=True)
-        normalized = cluster_data.apply(lambda x: (x-x.mean())/ x.std(), axis=0)
+        normalized = cluster_data.apply(lambda x: (x-x.mean())/x.std(), axis=0)
         cluster_dict[grouping["active"]][identifier] = {"false": cluster_data,
                                                         "true":  normalized}
 
     # performing the clustering
-    data_to_plot = cluster_dict[grouping["active"]][identifier][normalize]
-    # print(data_to_plot)
+    data_to_cluster = cluster_dict[grouping["active"]][identifier][normalize]
     if method == "k-means":
-        kmeans = cluster.KMeans(n_clusters=cluster_k, copy_x=False,
-                                random_state=random_state, max_iter=1000)
-        kmeans.fit_predict(data_to_plot)
+        kmeans = cluster.KMeans(n_clusters=cluster_k,
+                                copy_x=False, max_iter=500+100*cluster_k)
+        kmeans.fit_predict(data_to_cluster)
         labels = kmeans.labels_
+
     elif method == "k-medoids":
-        kmedoids = KMedoids(n_clusters=cluster_k, random_state=random_state,
-                            method="pam", init="random", max_iter=1000)
-        kmedoids.fit(data_to_plot)
+        kmedoids = KMedoids(n_clusters=cluster_k, method="pam",
+                            init="random", max_iter=500+100*cluster_k)
+        kmedoids.fit(data_to_cluster)
         labels = kmedoids.labels_
+
+    elif method in ["ward's method", "complete linkage", "single linkage"]:
+        param = {"ward's method": "ward",
+                 "complete linkage": "complete",
+                 "single linkage": "single"}[method]
+        agglom = cluster.AgglomerativeClustering(n_clusters=cluster_k,
+                                                 linkage=param)
+        labels = agglom.fit_predict(data_to_cluster)
+
     else:
-        print("The chosen method has not been implmented yet.")
+        print("The chosen method has not been implemented yet.")
         return
 
     # updating the dataframe and source with the new colour column
-    if grouping["active"] == "day":
-        colour = [cluster_colours[k] for k in labels]
-        try:
-            short = pd.Series(colour, index=dataframes["raw stocks"].index)
-            series = pd.Series([short[k] if k in short.index else "black"
-                                for k in dataframes["day"].index],
-                                index = dataframes["day"].index)
-        except ValueError:
-            series = pd.Series(colour, index=dataframes["day"].index)
-    else:
-        index = dataframes[grouping["active"]].index
-        try:
-            series = pd.Series([cluster_colours[k] for k in labels],
-                               index=index)
-        except ValueError:
-            series = pd.Series([cluster_colours[k] for k in labels],
-                               index=index[-len(labels):])
+    colour = [cluster_colours[k] for k in labels]
+    data = dataframes[grouping["active"]]
+    try:
+        series = pd.Series(colour, index=data.index)
+    except ValueError:
+        custom_index = [data.loc[i]["date"] for i in data.index
+                        if not np.isnan(data.loc[i]["close"])]
+        short = pd.Series(colour, index=custom_index)
+        series = pd.Series([short[k] if k in custom_index else k
+                            for k in data.index],
+                           index=data.index)
+
 
     dataframes[grouping["active"]]["colour"] = series
-    source_dict[grouping["active"]].data = dict(dataframes[grouping["active"]])
+    source_dict[grouping["active"]].data["colour"] = series
 
-def set_time_range(attr, new, old):
+def set_time_range():
     """ callback to alter the time range of the data used """
-    print(new)
+    start, end = date_slider.value
+    start = start - start%length_of_day # to make sure we have full days
+    end = end - end%length_of_day
+
+    # getting timestamps from the slider values
+    start_date = datetime.datetime.utcfromtimestamp(start/1000.0)
+    end_date = datetime.datetime.utcfromtimestamp(end/1000.0)
+
+    # truncating the dataframes to the chosen time range
+    for grouping, data in full_data.items():
+        truncated = data.truncate(before=start_date, after=end_date, axis=0)
+        dataframes[grouping] = truncated
+        cluster_dict[grouping] = {}
+
+        if grouping != "raw stocks":
+            source_dict[grouping] = ColumnDataSource(truncated)
+
+    # updating the plots
+    update_upper_time_plot()
+    update_lower_time_plot(None, None, None)
+    update_scatter_plot()    
+
 
 """ Helper functions """
 def get_select_values(data_select, ratio_select, format_select):
@@ -227,14 +262,17 @@ def update_dataframe_and_source(data, denom, form):
         if name not in dataframes[grouping["active"]].columns:
             absolute = np.absolute(dataframes[grouping["active"]][ratio])
             dataframes[grouping["active"]][f"{ratio}_absolute"] = absolute
-            logs = [np.log(k) if k > 0 else -10
+            logs = [np.log(k) if k > 0 else -2
                     for k in absolute if not np.isnan(k)]
 
             log_key = f"{ratio}_log_10(absolute)"
             try:
                 dataframes[grouping["active"]][log_key] = logs
             except ValueError:
-                series = pd.Series(logs, index=dataframes["raw stocks"].index)
+                data = dataframes[grouping["active"]]
+                custom_index = [data.loc[i]["date"] for i in data.index
+                                    if not np.isnan(data.loc[i]["close"])]
+                series = pd.Series(logs, index=custom_index)
                 dataframes[grouping["active"]][log_key] = series
 
     # updating the ColumnDataSource
@@ -267,14 +305,15 @@ def set_axis_label(data, denom, form, axis):
 
 
 """ Preparing the Data """
-tweet_columns = ["date", "nlikes", "nreplies", "nretweets"]
 data = full_grouping(tweet_columns)
 day, week, month, year, season, date_range, raw = data
 
-dataframes = {"day": day, "week": week, "month": month,
+full_data = {"day": day, "week": week, "month": month,
               "year": year, "season": season}
-source_dict = {key: ColumnDataSource(val) for key, val in dataframes.items()}
-dataframes["raw stocks"] = raw
+source_dict = {key: ColumnDataSource(val) for key, val in full_data.items()}
+full_data["raw stocks"] = raw
+dataframes = {key: data for key, data in full_data.items()}
+# we need a copy to be able to adjust the time range
 
 # specifying the possible choices fo the data selects
 stock_columns = list(raw.columns)
@@ -286,19 +325,10 @@ max_closing = np.max(dataframes[grouping["active"]]["close"])
 max_opening = np.max(dataframes[grouping["active"]]["open"])
 max_tweet_count = np.max(dataframes[grouping["active"]]["ntweets"])
 
-# =============================================================================
-# # Making a colour mapper.
-# max_volume = np.max(dataframes[grouping["active"]]["volume"])
-# min_volume = np.min(dataframes[grouping["active"]]["volume"])
-# mapper = log_cmap(field_name="volume", palette=bp.Viridis256,
-#                   low=min_volume, high=max_volume)
-# =============================================================================
-
-
 
 """ Making the left column """
 
-""" Creating the upper time plot. """
+""" Creating the upper time plot """
 TOOLS = "box_select, lasso_select, box_zoom, wheel_zoom, pan, reset"
 plot_stock = figure(plot_width=left_width, plot_height=large_height,
                     tools=TOOLS, toolbar_location="above",
@@ -325,15 +355,8 @@ stocks_hover = HoverTool(tooltips = [
                 formatters={'@date': 'datetime'})
 plot_stock.add_tools(stocks_hover)
 
-# =============================================================================
-# # Creating a ColorBar and adding it to the upper time plot.
-# color_bar = ColorBar(color_mapper=mapper["transform"],
-#                      width=10, location=(0,0))
-# plot_stock.add_layout(color_bar, "right")
-# =============================================================================
 
-
-""" Creating the lower time plot. """
+""" Creating the lower time plot """
 plot_tweet = figure(plot_width=left_width, plot_height=small_height,
                     tools="", toolbar_location=None,
                     x_axis_type="datetime",
@@ -353,11 +376,13 @@ range_tool.overlay.fill_color = "navy"
 range_tool.overlay.fill_alpha = 0.2
 plot_tweet.add_tools(range_tool)
 
-
 # Adding a hovertool to the lower time plot.
 tweets_hover = HoverTool(tooltips = [
                     ("date", "@date{%F}"),
-                    ("ntweets", "@ntweets")],
+                    ("ntweets", "@ntweets"),
+                    ("nlikes", "@nlikes"),
+                    ("nreplies", "@nreplies"),
+                    ("nretweet", "@nretweets")],
                 formatters={'@date': 'datetime'})
 plot_tweet.add_tools(tweets_hover)
 
@@ -380,13 +405,13 @@ update_upper_button = Button(label="apply changes to the upper plot",
 update_upper_button.on_click(update_upper_time_plot)
 
 tweet_select = Select(title="tweet data", value="ntweets",
-                       options=["ntweets", "nlikes", "nretweets", "nreplies"],
+                       options=tweet_columns[1:]+["ntweets"],
                        width=fill_width)
 tweet_select.on_change("value", update_lower_time_plot)
 
 
 """ Making the right column """
-scatter_plot = figure(plot_width=right_width, plot_height=right_width,
+scatter_plot = figure(plot_width=right_width, plot_height=right_width-16,
                       tools=TOOLS,  toolbar_location="above",
                       x_range=[-100, max_closing*1.1],
                       y_range=[-100, max_opening*1.1])
@@ -395,17 +420,10 @@ scatter_plot.yaxis.axis_label = "close"
 scatter_plot.scatter(x="open", y="close", color="colour",
                      size=dot_size, marker="circle",
                      source=source_dict[grouping["active"]])
-
-# Adding a HoverTool to the scatter plot.
-# scatter_hover = HoverTool(tooltips = [
-#                         ("date", "@date{%F}"),
-#                         ("open", "@open$"),
-#                         ("close", "@close$")],
-#                     formatters={'@date': 'datetime'})
 scatter_plot.add_tools(stocks_hover)
 
 
-""" Making the change rows for the scatter plot. """
+""" Making the change rows for the scatter plot """
 # selects for the x-axis
 scatter_x_data = Select(title="x-data", value="open",
                         options=full_columns, width=small_width)
@@ -438,74 +456,54 @@ update_scatter_button.on_click(update_scatter_plot)
 
 
 """ Making the RadioButtonGroup for the grouping """
-button_group = RadioButtonGroup(labels=grouping["keys"], width=right_width,
-                                margin=[20, 5, 0, 5])
+button_group = RadioButtonGroup(labels=grouping["keys"], width=right_width)
 button_group.on_click(perform_grouping)
 
 
 """ Making the widgets for the clustering """
+cluster_method = Select(title="clustering method", value="k-means",
+                        options=["k-means", "k-medoids", "ward's method",
+                                 "complete linkage", "single linkage"],
+                        width=small_width)
+cluster_method.on_change("value", modify_clustering_k)
 clustering_k = Slider(title="number of clusters",
                         start=1, end=7, value=3, step=1,
-                        width=small_width)
-cluster_method = Select(title="clustering method", value="k-means",
-                        options=["k-means", "k-medoids",
-                                 # "bottom-up", "top-down"
-                                 ],
-                        width=small_width)
-cluster_random = Slider(title="random state",
-                        start=0, end=10, value=0, step=1,
                         width=small_width)
 cluster_attributes = Select(title="attributes",
                             value="visible on scatter plot",
                             options=["visible on scatter plot",
                                      "open, close, volume, ntweets"],
-                            width=2*tiny_width, margin=grouping_margin)
+                            width=3*tiny_width+10, margin=grouping_margin)
 cluster_norm = Select(title="normalize data", value="false",
-                      options=["false", "true"],
-                      width=tiny_width, margin=grouping_margin)
+                      options=["false", "true"], width=small_width)
 cluster_button = Button(label="perform clustering",
                         width=fill_width, margin=button_margin)
 cluster_button.on_click(perform_clustering)
 
 
-# =============================================================================
-# """ Adding a Select for data imputation """
-# imputation_select = Select
-# =============================================================================
-
 """ Adding a DateRangeSlider to change the range of the data """
 date_slider = DateRangeSlider(title="Date Range: ",
                              start=date_range[0], end=date_range[-1],
-                             value=(date_range[0], date_range[-1]), step=1,
-                             width=right_width, margin=button_margin)
-date_slider.on_change("value", set_time_range)
-date_slider.disabled = True
+                             value=(date_range[0], date_range[-1]),
+                             step=length_of_day, width=right_width)
+
+date_button = Button(label="update time range",
+                     width=right_width)
+date_button.on_click(set_time_range)
 
 
 """ Arranging the layout and showing it """
 time_plots = column(plot_stock,
                     plot_tweet)
-# time_related = row(stock_data,
-#                     stock_ratio,
-#                     stock_format,
-#                     update_upper_button,
-#                     tweet_select)
-# cluster_related = row(clustering_k,
-#                       cluster_method,
-#                       cluster_random,
-#                       cluster_attributes,
-#                       cluster_norm,
-#                       cluster_button)
 
 left_changes = row(column(stock_data,
-                          clustering_k),
-                   column(stock_ratio,
                           cluster_method),
+                   column(stock_ratio,
+                          clustering_k),
                    column(stock_format,
-                          cluster_random),
+                          cluster_norm),
                    column(update_upper_button,
-                          row(cluster_attributes,
-                              cluster_norm)),
+                          cluster_attributes),
                    column(tweet_select,
                           cluster_button))
 
@@ -519,16 +517,13 @@ scatter_related = column(scatter_plot,
                          update_scatter_button)
 
 general_changes = column(button_group,
-                         date_slider)
+                         date_slider,
+                         date_button)
 
 layout = row(column(time_plots,
                     left_changes),
              column(scatter_related,
                     general_changes))
-# layout = column(row(time_plots,
-#                     scatter_related),
-#                 row(left_changes,
-#                     general_changes))
 
 layout.sizing_mode = "stretch_both"
 curdoc().add_root(layout)
