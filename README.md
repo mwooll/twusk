@@ -2,7 +2,7 @@
 A Data Science project which explores the relationship between Elon Musk's tweets and the TSLA stock prices.
 
 Includes
-    Data:
+<\b>Data:
         -tweets: raw Tweet data from https://www.kaggle.com/datasets/ayhmrba/elon-musk-tweets-2010-2021 (retreived March 25th 2022)
         -needed:
             -raw: raw stock price data, some copies of raw Tweet data
@@ -15,7 +15,7 @@ Includes
                 word_count: number of times a word appears in all Tweets
     EDA:
         -EDA notebook
-        -Interactive data explorer
+        -Interactive data explorer (uses Bokeh, to use this, it is easiest to run "start_interactive_explorer.py" which will start it.)
     Other files:
         -ARIMA: ARIMA models of stock price per week and month
         -count_words.py: Script to count occurences of words in the Tweets data set and generate "word_count.csv"
