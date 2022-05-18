@@ -2,7 +2,7 @@
 A Data Science project which explores the relationship between Elon Musk's tweets and the TSLA stock prices.
 
 Includes
-<\b>Data:
+    Data:
         -tweets: raw Tweet data from https://www.kaggle.com/datasets/ayhmrba/elon-musk-tweets-2010-2021 (retreived March 25th 2022)
         -needed:
             -raw: raw stock price data, some copies of raw Tweet data
