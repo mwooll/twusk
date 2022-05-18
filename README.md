@@ -6,7 +6,6 @@ Includes
         -tweets: raw Tweet data from https://www.kaggle.com/datasets/ayhmrba/elon-musk-tweets-2010-2021 (retreived March 25th 2022)
         -needed:
             -raw: raw stock price data, some copies of raw Tweet data
-                TSLA_2010_2019: https://www.kaggle.com/datasets/timoboz/tesla-stock-data-from-2010-to-2020 (retreived March 25th 2022, not used because it contained wrong values (did not match with the other data set in timespan they both covered))
                 TSLA_2017_2022: https://www.nasdaq.com/market-activity/stocks/tsla/historical (retreived March 25th 2022)
                 TSLA_2010_2018: https://finance.yahoo.com/quote/TSLA/history?period1=1277769600&period2=1535414400&interval=1d&filter=history&frequency=1d&includeAdjustedClose=true (retreived March 31th 2022, replacement for TSLA_2010_2019)
             -cleaned: cleaned data sets
